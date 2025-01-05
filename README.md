@@ -7,6 +7,8 @@ Slowai es una herramienta que combina el ataque DoS Slowloris con IA para determ
 Junto a la ejecución de scripts avanzados de NMAP, se detecta si el servidor cuenta con un WAF activo o no, en caso de contar con uno, la IA, analiza y toma medidas para su evasión, por lo contrario, la IA continuará con el ataque slowloris supervisando constantemente el ataque para así ajustar la frecuencia y conexiones.
 
 
+----
+
 
 Slowai is a tool that combines the Slowloris DoS attack with AI to determine and adjust attack timing for greater precision.
 
