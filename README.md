@@ -1,6 +1,6 @@
 # SLOWAI
 
-### **Herramienta Inteligente para Ataques Slowloris**
+### **Herramienta Inteligente con IA para Ataques Slowloris**
 
 **Slowai** es una herramienta avanzada que combina el ataque **Slowloris DoS** con **inteligencia artificial (IA)** para optimizar los tiempos de ataque, logrando mayor precisión y eficiencia.
 
